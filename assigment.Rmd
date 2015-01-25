@@ -1,0 +1,158 @@
+---
+title: "Prediction Assignment 'Practical Machine Learning'"
+author: "Felix Honold"
+date: "Saturday, January 24, 2015"
+output: html_document
+---
+
+```{r library, echo=FALSE, include=FALSE}
+library(caret); # general purpose machine learning package
+library(randomForest);library(rpart); # decision tree algorithms
+library(ggplot2); # general purpose plots
+library(rattle); # for 'fancyRpartPlot' function
+library(Hmisc); # for 'cut2' function
+library(psych); # for 'descirbe' function
+```
+
+### Introduction
+
+These days almost any sort of data is collected and evaluated. Most meaningful is data that can be used to predict any sort of behavior or future evolutions. This exercise focuses on the analysis of the correct execution of gym activities.
+
+**Background**
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset). 
+
+**Remark**: The second part of this section quoted 1:1 from [1].
+
+### Methods
+
+**Data Collection**
+
+Data has been prepared by the course instructor and was downloaded from the coursea.org see [1] site. The data's origin can be found at the group-share of the study 'Qualitative Activity Recognition of Weight Lifting Exercises' - see [2].
+
+After downloading the data has been loaded ino the dataset **pmlTrain**:
+```{r load}
+pmlTrain <- read.csv("pml-training.csv")
+#View(pmlTrain)
+pmlTest <- read.csv("pml-testing.csv")
+#View(pmlTest)
+```
+An initial eyeballing showed that the many of the 160 columns are mostly empty. As the test set provided does neither have these data columns it makes no sense to carry them along into further analysis and modelling step. The data has been suppressed:
+```{r strip}
+#reduce colums as many colums have a lot of missing values
+pmlTrain_red <- pmlTrain[c(2,8:11,37:49,60:68,84:86,102,113:124,140,151:160)]
+names(pmlTest)[160] <- names(pmlTrain)[160] # I like to have the same names
+pmlTest_red <- pmlTest[c(2,8:11,37:49,60:68,84:86,102,113:124,140,151:160)]
+```
+
+**Initial (exploratory) analysis**
+
+The remaining feature variables (in **pmlTrain_red**) have been eyeballed and analyzed in more detail.
+```{r eyeball, message=FALSE, results='hide', warning=FALSE}
+#eyeball and check characteristics of each feature
+str(pmlTrain_red) 
+summary(pmlTrain_red)
+describe(pmlTrain_red)
+num_features <- length(names(pmlTrain_red))-1
+num_observations <- length(pmlTrain_red$classe)
+round(cor(pmlTrain_red[2:num_features]),2) #correlation analysis
+#for(i in 2:num_features){
+#  print(names(pmlTrain_red)[i])
+#  print(qplot(1:num_observations, pmlTrain_red[,i], data=pmlTrain_red, col=classe, ylab=names(pmlTrain_red)[i], xlab="Observations"))
+#  Sys.sleep(5)not accurate - model not
+#}
+```
+Short summary of the analyses:
+
+* data is clean, no missing values and therefore no data cleansing (e.g. missing value imputing) needed
+* all feature variable have been plotted against the output variable without finding any direct relation between a feature and the output variable
+* the feature variables have different variances, that could help to assess the data of an exercise, but this information is not of big help for predicting an isolated data point without having it's context
+
+Two sample plots from this 'eyeball-analysis' are shown below:
+```{r plot1, echo=FALSE}
+qplot(1:num_observations, pmlTrain_red[,12], data=pmlTrain_red, col=classe, ylab=names(pmlTrain_red)[12], xlab="Observations")
+qplot(1:num_observations, pmlTrain_red[,22], data=pmlTrain_red, col=classe, ylab=names(pmlTrain_red)[22], xlab="Observations")
+
+```
+
+**Subsampling**
+
+In order to assess the models before submitting the predicting of the 20 data rows in the test set, the training set has been split into two subsets. The bigger (70%) is used for training the model and the smaller (30%) for testing.
+```{r partition}
+set.seed(10000)
+inTrain <- createDataPartition(y=pmlTrain_red$classe, p=0.7, list=FALSE)
+train <- pmlTrain_red[inTrain,]
+test <- pmlTrain_red[-inTrain,]
+summary(pmlTrain_red$classe)
+summary(train$classe)
+summary(test$classe)
+```
+
+**Modeling**
+
+The analysis did not disclose any easily derivable relation between a feature variable and the output variable that is intended to be predicted. The only option was to try out several models. 
+
+The **train**-dataset has been used to try out 3 models:
+
+1. Regular decision tree using **rpart library** - Result: **Accuracy: 0.5, 95% CI: (0.4916, 0.5084)**
+2. Radom Forest decision tree using **randomForest library** - Result: extremely long runtimes; the execution needed to be halted
+3. Random Forest decision tree using **randomForest library after a PCA** (Principal Component Analysis) explaining 90% of the variance with 18 principal components - Result: **Accuracy: 0.5, 95% CI: (0.4916, 0.5084)**
+
+The modeling code is shown below:
+```{r dummy_code, eval=FALSE}
+#1: model with rpart (not accurate - model not usable)
+set.seed(11111)
+modFit_tree <- train(classe ~ .,method="rpart",data=train)
+plot(modFit_tree$finalModel, uniform=TRUE, main="Classification Tree")
+text(modFit_tree$finalModel, use.n=TRUE, all=TRUE)
+fancyRpartPlot(modFit_tree$finalModel)
+confusionMatrix(train$classe,predict(modFit_tree,train)) #Result: Accuracy : 0.5, 95% CI : (0.4916, 0.5084)
+#2: model with rf - RandomForest (did not terminate; very long running halted - model not usable)
+set.seed(22222)
+modFit_ft <- train(classe ~ .,method="rf",data=train,prox=TRUE)
+confusionMatrix(train$classe,predict(modFit_ft,train))
+#3: Model with PCA and Random Forest (did run very long, but yield a very good result)
+set.seed(33333)
+prComp <- preProcess(train[,c(-1,-54)],method="pca", thresh=0.9); #prComp
+trainPCA <- predict(prComp,train[,c(-1,-54)]); #trainPCA
+modFitPCA <- train(train$classe ~ .,method="rf", data=trainPCA); #modFitPCA
+trainPCA <- predict(prComp,train[,c(-1,-54)])
+confusionMatrix(train$classe,predict(modFitPCA,trainPCA))
+testPCA <- predict(prComp,test[,c(-1,-54)]); #testPCA
+confusionMatrix(test$classe,predict(modFitPCA,testPCA)) # Result: Accuracy : 0.9742, 95% CI : (0.9698, 0.9781)
+```
+The results of the chosen model three are shown in the section 'Results'.
+
+### Results
+
+Out of the three models outlined and shortly explained in the 'Modeling' section the third model with the PCA analysis and Random Forest Decision Tree had the best performance and accuracy properties. Therefore it has been chosen as the target model. All 20 observations of the test set required for the submission of the assignment have benn correctly classified. The results are shown below:
+```{r code1, message=FALSE, warning=FALSE}
+set.seed(33333)
+#PCA
+prComp <- preProcess(train[,c(-1,-54)],method="pca", thresh=0.9); #prComp
+trainPCA <- predict(prComp,train[,c(-1,-54)]); #trainPCA
+modFitPCA <- train(train$classe ~ .,method="rf", data=trainPCA); #modFitPCA
+#Predict train
+trainPCA <- predict(prComp,train[,c(-1,-54)]) #trainPCA #(test Set)
+confusionMatrix(train$classe,predict(modFitPCA,trainPCA)) # Result train set: Accuracy : 1, 95% CI : (0.9997, 1)
+#Predict test
+testPCA <- predict(prComp,test[,c(-1,-54)]); #testPCA #(test Set)
+confusionMatrix(test$classe,predict(modFitPCA,testPCA)) # Result test set: Accuracy : 0.9742, 95% CI : (0.9698, 0.9781)
+#Predict submission data set
+finalTestPCA <- predict(prComp,pmlTest_red[,c(-1,-54)]); #finalTestPCA #(for submission)
+answers <- predict(modFitPCA,finalTestPCA); answers
+```
+
+**Reproducability**
+
+The analysis has been performed in R [4] and all information and code snippets needed to reproduce the analysis are available in this and the referenced documents [3].
+
+### References
+
+(1): Coursera assigment 'Practical Machine Learning' <https://class.coursera.org/predmachlearn-010>
+
+(2): Study report 'Qualitative Activity Recognition of Weight Lifting Exercises' <http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201>
+
+(3): Complete analysis code <https://github.com/fho1962/PracticalMachineLearning>
+
+(4): R project <http://www.r-project.org/>
